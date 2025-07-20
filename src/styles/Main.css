@@ -1,0 +1,74 @@
+.amusement-park-theme {
+  background: linear-gradient(to bottom, #87CEEB 0%, #f0f8ff 100%);
+  min-height: 100vh;
+  overflow: hidden;
+  color: #333;
+}
+
+.main-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 40px;
+  background-color: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  position: relative; 
+  z-index: 10; 
+}
+
+.main-header h1 {
+  font-family: 'Titan One', cursive;
+  font-size: 2.5rem;
+  color: #4a4a4a;
+  text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+}
+
+.header-buttons {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.create-room-btn {
+  background-color: #1e90ff;
+  color: white;
+  border: none;
+  border-radius: 20px;
+  padding: 10px 20px;
+  font-size: 1rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.create-room-btn:hover {
+  background-color: #1c86ee;
+}
+
+.profile-icon {
+  width: 45px;
+  height: 45px;
+  background-color: #1e90ff;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid white;
+}
+
+.amusement-park-main {
+  position: relative;
+  height: calc(100vh - 90px);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.cave-image {
+  position: absolute;
+  bottom: 10px;
+  left: 50px;
+  width: 750px;
+  height: auto;
+  z-index: 2;
+}

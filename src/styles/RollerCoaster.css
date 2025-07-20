@@ -1,0 +1,75 @@
+/* Roller Coaster Styles */
+.roller-coaster-container {
+  width: 400vw;
+  height:100vh;
+  position: absolute;
+  bottom: -100px;
+  left: 100px;
+  overflow: hidden;
+  z-index: 1; 
+  background-image: url('../../public/images/image.png');
+  background-repeat: no-repeat;
+  background-position-x: 500px;
+}
+
+.coaster-cars-wrapper {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  top: 0;
+  left: 0;
+}
+
+.coaster-car {
+  width: 240px;
+  height: 240px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-color: transparent;
+  border-radius: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: black;
+  font-weight: bold;
+  box-shadow: none;
+  position: absolute;
+  transform: translate(85vw, -20vh) rotate(-90deg); /* Set initial position */
+  animation: follow-the-track 40s linear infinite;
+  cursor: pointer; /* 클릭 가능함을 나타내는 커서 추가 */
+}
+
+.coaster-car:nth-child(2n+1) {
+  background-image: url('../../public/images/rc_red.png');
+}
+
+.coaster-car:nth-child(2n) {
+  background-image: url('../../public/images/rc_yel.png');
+}
+
+@keyframes follow-the-track {
+  0% {
+    transform: translate(82vw, -20vh) rotate(-90deg);
+  }
+
+  10% {
+    transform: translate(82vw, 0vh) rotate(-90deg);
+  }
+
+  45% {
+    transform: translate(82vw, 40vh) rotate(-90deg);
+  }
+
+  65% {
+    transform: translate(82vw, 65vh) rotate(0deg); 
+  }
+
+  85% {
+    transform: translate(50vw, 65vh) rotate(0deg);
+  }
+
+  100% {
+    transform: translate(10vw, 65vh) rotate(0deg);
+  }
+}

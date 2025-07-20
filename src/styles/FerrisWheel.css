@@ -1,0 +1,30 @@
+.ferris-wheel-container {
+  position: relative;
+  width: 800px;
+  height: 800px;
+  margin: 0 auto;
+  overflow: hidden;
+  left: 250px;
+}
+
+.ferris-frame {
+  position: absolute;
+  width: 800px;
+  height: 800px;
+  top: 0;
+  left: 0;
+  background-image: url('/public/images/ferris.png');
+  background-size: contain;
+  background-position: center;
+  background-repeat: no-repeat;
+  z-index: 1;
+}
+
+.cabin {
+  position: absolute;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  transform-origin: center;
+  z-index: 2;
+}

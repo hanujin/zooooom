@@ -1,0 +1,19 @@
+.signup-card {
+    width: 380px;
+    background: #ffffff;
+    border-radius: 16px;
+    padding: 48px 40px 40px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
+    text-align: center;
+  }
+  
+  .signup-title {
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+  .signup-sub {
+    font-size: 13px;
+    color: #666;
+    margin-bottom: 28px;
+  }
