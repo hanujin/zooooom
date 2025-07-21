@@ -11,17 +11,6 @@ function Main() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // const fetchProfileData = async () => {
-    //   try {
-    //     const response = await getProfile();
-    //     setUserProfile(response.data); 
-    //   } catch (error) {
-    //     console.error('프로필 정보를 가져오는데 실패했습니다:', error);
-    //     alert('세션이 만료되었거나 유효하지 않습니다. 다시 로그인해주세요.');
-    //     navigate('/');
-    //   }
-    // };
-    // fetchProfileData();
   }, [navigate]);
 
   const handleCreateRoom = () => {

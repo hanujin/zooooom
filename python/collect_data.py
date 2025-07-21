@@ -72,7 +72,7 @@ while cap.isOpened():
                 cv2.putText(image, f"Collecting {gestures[current_gesture]}: {len(data_points)}", 
                             (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-    if collecting and len(data_points) >= 2000:
+    if collecting and len(data_points) >= 1000:
         file_path = os.path.join(DATA_PATH, f'{gestures[current_gesture]}.npy')
         np.save(file_path, np.array(data_points))
         print(f"'{gestures[current_gesture]}' 데이터 저장 완료. ({file_path})")

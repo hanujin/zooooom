@@ -36,7 +36,7 @@
   box-shadow: none;
   position: absolute;
   transform: translate(85vw, -20vh) rotate(-90deg); /* Set initial position */
-  animation: follow-the-track 40s linear infinite;
+  animation: follow-the-track 15s linear infinite;
   cursor: pointer; /* 클릭 가능함을 나타내는 커서 추가 */
 }
 
@@ -53,23 +53,15 @@
     transform: translate(82vw, -20vh) rotate(-90deg);
   }
 
-  10% {
-    transform: translate(82vw, 0vh) rotate(-90deg);
+  40% {
+    transform: translate(82vw, 30vh) rotate(-90deg);
   }
 
-  45% {
-    transform: translate(82vw, 40vh) rotate(-90deg);
-  }
-
-  65% {
+  62% {
     transform: translate(82vw, 65vh) rotate(0deg); 
   }
 
-  85% {
-    transform: translate(50vw, 65vh) rotate(0deg);
-  }
-
   100% {
-    transform: translate(10vw, 65vh) rotate(0deg);
+    transform: translate(20vw, 65vh) rotate(0deg);
   }
 }

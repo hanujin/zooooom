@@ -28,10 +28,25 @@
   overflow: hidden;
 }
 
+.participant-view.local {
+  position: relative;
+}
+
+.output_canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 10;
+  transform: scaleX(-1); /* 캔버스를 좌우 반전하여 비디오와 맞춤 */
+}
+
 .video-feed {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  transform: scaleX(-1); /* 비디오를 좌우 반전하여 거울 모드로 표시 */
 }
 
 .participant-name {
@@ -46,13 +61,14 @@
 
 
 .controls-bar {
-  height: 80px;
+  height: 90px;
   background-color: #252525;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
-  flex-shrink: 0; 
+  flex-shrink: 0;
+  position: relative; /* For drawing controls positioning */
 }
 
 .sticker-button {
@@ -60,22 +76,77 @@
   cursor: pointer;
 }
 
+.control-buttons {
+  display: flex;
+  gap: 16px;
+}
+
 .control-buttons button {
-  background: #444;
+  background: #3a3a3a;
   color: white;
   border: none;
-  border-radius: 50%;
-  width: 48px;
-  height: 48px;
-  margin: 0 8px;
+  border-radius: 12px;
+  width: 52px;
+  height: 52px;
   cursor: pointer;
-  font-size: 20px;
+  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s;
 }
+
+.control-buttons button:hover {
+  background-color: #4a4a4a;
+}
+
 .control-buttons .leave-btn {
   background-color: #e74c3c;
-  border-radius: 24px;
-  width: auto;
-  padding: 0 24px;
+}
+
+.control-buttons .leave-btn:hover {
+  background-color: #c0392b;
+}
+
+.drawing-controls {
+  position: absolute;
+  bottom: 100px; /* Position above the controls bar */
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #333;
+  padding: 12px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.drawing-controls input[type="color"] {
+  width: 36px;
+  height: 36px;
+  border: none;
+  padding: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.drawing-controls input[type="range"] {
+  width: 120px;
+}
+
+.drawing-controls button {
+  background: #555;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.drawing-controls button:hover {
+  background-color: #666;
 }
 
 .chat-panel {
