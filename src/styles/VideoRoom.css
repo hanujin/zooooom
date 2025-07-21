@@ -39,14 +39,13 @@
   width: 100%;
   height: 100%;
   z-index: 10;
-  transform: scaleX(-1); /* 캔버스를 좌우 반전하여 비디오와 맞춤 */
+  transform: scaleX(-1);
 }
 
 .video-feed {
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  transform: scaleX(-1); /* 비디오를 좌우 반전하여 거울 모드로 표시 */
+  transform: scaleX(-1);
 }
 
 .participant-name {
@@ -211,13 +210,19 @@
 
 .cursor {
   position: absolute;
-  width: 20px;
-  height: 20px;
-  background: red;
-  border-radius: 50%;
+  width: 24px; /* 아이콘 크기에 맞게 조정 */
+  height: 24px; /* 아이콘 크기에 맞게 조정 */
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="white" stroke="black" stroke-width="1"><path d="M4 4l16 12-7 1-3 7-6-20z"/></svg>');
+  background-size: contain;
+  background-repeat: no-repeat;
   z-index: 101;
   pointer-events: none; /* 커서가 다른 요소의 이벤트를 막지 않도록 함 */
-  transform: translate(-50%, -50%);
+  transform-origin: top left; /* SVG 커서의 포인터 위치에 맞게 조정 */
+  transition: transform 0.1s ease;
+}
+
+.cursor.grabbing {
+  transform: scale(0.8); /* 클릭 시 작아지는 효과 */
 }
 
 .sticker {

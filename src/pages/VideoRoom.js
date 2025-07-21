@@ -47,6 +47,7 @@ function VideoRoom() {
   const lastGesture = useRef(null);
   const gestureTimeout = useRef(null);
   const exitTimeout = useRef(null);
+  const prevGestureRef = useRef(null);
 
   const toggleCamera = (status) => {
     if (videoRef.current && videoRef.current.srcObject) {
@@ -113,16 +114,42 @@ function VideoRoom() {
     }
 
     const landmarks = detectionResults.landmarks[0];
+    const cursorX = (1 - landmarks[8].x) * canvas.clientWidth;
+    const cursorY = landmarks[8].y * canvas.clientHeight;
+
+    // 제스처가 변경될 때만 특정 액션(클릭, 토글)을 트리거
+    if (prevGestureRef.current !== currentGestureText) {
+      if (currentGestureText === 'grab' && !isDrawingMode) {
+        // 현재 커서 위치의 엘리먼트를 찾아서 클릭
+        const clickElem = document.elementFromPoint(cursorX, cursorY);
+        if (clickElem) {
+          // 클릭 가능한 요소인지 확인 (예: button, a 등)
+          if (typeof clickElem.click === 'function') {
+            clickElem.click();
+            console.log("Clicked element:", clickElem);
+          }
+        }
+      } else if (currentGestureText === 'draw_mode') {
+        setIsDrawingMode(prev => !prev);
+      }
+    }
+    prevGestureRef.current = currentGestureText;
     
     // 제스처별 액션 분기
     switch (currentGestureText) {
       case 'cursor':
-        const cursorX = (1 - landmarks[8].x) * canvas.clientWidth;
-        const cursorY = landmarks[8].y * canvas.clientHeight;
+      case 'draw_mode':
         setCursorPosition({ x: cursorX, y: cursorY });
         setIsCursorVisible(true);
+        setIsGrabbing(false);
         break;
       
+      case 'grab':
+        setCursorPosition({ x: cursorX, y: cursorY });
+        setIsCursorVisible(true);
+        setIsGrabbing(true);
+        break;
+
       // TODO: 아래 제스처들에 대한 실제 액션 함수를 연결해야 합니다.
       case 'volume_up':
         // 예: changeVolume(0.1);
@@ -148,7 +175,7 @@ function VideoRoom() {
         break;
     }
     
-  }, [currentGestureText, detectionResults]);
+  }, [currentGestureText, detectionResults, isDrawingMode]);
 
   // MediaPipe 및 제스처 모델 초기화
   useEffect(() => {
@@ -177,7 +204,7 @@ function VideoRoom() {
         console.log("학습된 제스처 목록:", actionList);
 
       } catch (error) {
-        console.error("AI 모델 로딩 중 심각한 오류 발생:", error);
+        console.error("AI 모델 로딩 중 오류 발생:", error);
       }
     };
     loadModels();
@@ -216,10 +243,16 @@ function VideoRoom() {
 
     const video = videoRef.current;
     let animationFrameId;
-
+    let lastTs = -1;
     const predictWebcam = () => {
       if (video.readyState >= 2) {
-        const results = handLandmarker.detectForVideo(video, Date.now());
+        // const videoTimeMs = video.currentTime * 1000;
+        let ts = Math.round(video.currentTime * 1000);
+
+        // 2) 이전 값과 같거나 작으면 +1 ms 보정
+        if (ts <= lastTs) ts = lastTs + 1;
+        lastTs = ts;
+        const results = handLandmarker.detectForVideo(video, lastTs);
         setDetectionResults(results);
         
         if (results.landmarks && results.landmarks.length > 0 && actions.length > 0) {
@@ -231,13 +264,21 @@ function VideoRoom() {
             const predictedIndex = prediction.argMax(1).dataSync()[0];
             const predictedGesture = actions[predictedIndex];
             
-            // console.log("예측된 제스처:", predictedGesture); // 로그 추가
-            setCurrentGestureText(predictedGesture);
+            if (predictedGesture !== lastGesture.current) {
+              clearTimeout(gestureTimeout.current);
+              lastGesture.current = predictedGesture;
+              gestureTimeout.current = setTimeout(() => {
+                setCurrentGestureText(predictedGesture);
+              }, 1000);
+            }
+            
             tf.dispose([inputTensor, prediction]);
           } catch (error) {
             console.error("제스처 예측 중 오류:", error);
           }
         } else {
+          clearTimeout(gestureTimeout.current);
+          lastGesture.current = null;
           setCurrentGestureText('제스처 없음');
         }
       }
@@ -266,6 +307,16 @@ function VideoRoom() {
 
     context.clearRect(0, 0, canvas.width, canvas.height);
 
+    // 랜드마크 그리기 (가장 확실한 표준 방식)
+    if (showLandmarks && detectionResults && detectionResults.landmarks) {
+      const drawingUtils = new DrawingUtils(context);
+      for (const landmarks of detectionResults.landmarks) {
+        drawingUtils.drawConnectors(landmarks, HandLandmarker.HAND_CONNECTIONS, { color: "#00E0FF", lineWidth: 3 });
+        drawingUtils.drawLandmarks(landmarks, { color: "#FFB700", radius: 4 });
+      }
+    }
+
+    // 그린 선들 렌더링
     lines.forEach(line => {
       context.strokeStyle = line.color;
       context.lineWidth = line.lineWidth;
@@ -278,14 +329,6 @@ function VideoRoom() {
       });
       context.stroke();
     });
-
-    if (showLandmarks && detectionResults && detectionResults.landmarks) {
-      const drawingUtils = new DrawingUtils(context);
-      for (const landmarks of detectionResults.landmarks) {
-        drawingUtils.drawConnectors(landmarks, HandLandmarker.HAND_CONNECTIONS, { color: "#00FF00", lineWidth: 5 });
-        drawingUtils.drawLandmarks(landmarks, { color: "#FF0000", lineWidth: 2 });
-      }
-    }
   }, [lines, detectionResults, showLandmarks]);
 
   return (
@@ -299,7 +342,7 @@ function VideoRoom() {
             <video ref={videoRef} autoPlay playsInline muted className="video-feed"></video>
             <canvas ref={canvasRef} className="output_canvas"></canvas>
             <div className="gesture-display">{currentGestureText}</div>
-            {isCursorVisible && <div className="cursor" style={{ left: `${cursorPosition.x}px`, top: `${cursorPosition.y}px` }}></div>}
+            {isCursorVisible && <div className={`cursor ${isGrabbing ? 'grabbing' : ''}`} style={{ left: `${cursorPosition.x}px`, top: `${cursorPosition.y}px` }}></div>}
             <div 
               className="sticker" 
               style={{ 

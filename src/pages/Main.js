@@ -42,6 +42,7 @@ function Main() {
           <div className="header-buttons">
             {userProfile && <span className="user-greeting">{userProfile.nickname || userProfile.name}님, 환영합니다!</span>}
             <button className="create-room-btn" onClick={handleCreateRoom}>+ 새 놀이기구 탑승</button>
+            <button className="mypage-btn" onClick={() => navigate('/mypage')}>마이페이지</button>
             <button className="logout-btn" onClick={handleLogout}>나가기</button>
           </div>
         </header>

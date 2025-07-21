@@ -47,6 +47,23 @@
   background-color: #1c86ee;
 }
 
+.mypage-btn {
+  background-color: #ff4757;
+  color: white;
+  border: none;
+  border-radius: 20px;
+  padding: 10px 20px;
+  font-size: 1rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.mypage-btn:hover {
+  background-color: #e04050;
+}
+
 .profile-icon {
   width: 45px;
   height: 45px;
