@@ -71,6 +71,10 @@
   width: 100%;
   max-width: 480px;
   box-sizing: border-box;
+  min-height: 500px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .brand-logo {

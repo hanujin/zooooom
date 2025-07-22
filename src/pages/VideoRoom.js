@@ -68,6 +68,21 @@ function VideoRoom() {
   };
 
   const handleLeaveRoom = () => {
+    const newTicket = {
+      id: new Date().getTime(),
+      date: new Date().toISOString(),
+      image: '/images/ticket1.png',
+      title: roomInfo.name
+    };
+
+    try {
+      const existingTickets = JSON.parse(localStorage.getItem('tickets')) || [];
+      const updatedTickets = [...existingTickets, newTicket];
+      localStorage.setItem('tickets', JSON.stringify(updatedTickets));
+    } catch (error) {
+      console.error("Error saving tickets to localStorage", error);
+    }
+
     navigate('/main');
   };
 
