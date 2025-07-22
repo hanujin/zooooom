@@ -1,372 +1,352 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { HandLandmarker, FilesetResolver, DrawingUtils } from "@mediapipe/tasks-vision";
-import * as tf from '@tensorflow/tfjs';
+import { HandLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
 import './../styles/VideoRoom.css';
 
-// ParticipantView는 원격 참가자용으로 유지합니다.
-const ParticipantView = ({ name }) => {
-  return (
-    <div className="participant-view">
-      <video autoPlay playsInline className="video-feed"></video>
-      <div className="participant-name">{name}</div>
-    </div>
-  );
-};
+/* ──────────────────────────────────────────────────────────
+   SIMPLE PLACE‑HOLDER COMPONENT FOR REMOTE PARTICIPANTS
+   ────────────────────────────────────────────────────────── */
+const ParticipantView = ({ name }) => (
+  <div className="participant-view">
+    <video autoPlay playsInline className="video-feed" />
+    <div className="participant-name">{name}</div>
+  </div>
+);
 
-function VideoRoom() {
-  const { meetingCode } = useParams();
-  const navigate = useNavigate();
-  const [roomInfo, setRoomInfo] = useState({ name: '테스트 채팅방' });
-  const [participants, setParticipants] = useState([
-    { id: 'remote1', name: '참가자 1' },
-  ]);
+/* ──────────────────────────────────────────────────────────
+   LANDMARK NORMALISATION – same algo as train_knn.py
+ ────────────────────────────────────────────────────────── */
+function normalise(flat63) {
+  // if (flat63.length !== 63) return flat63;
+  const step = flat63.length === 63 ? 3 : 2;
+  const pts = [];
+  for (let i = 0; i < 21; i++) pts.push([flat63[step * i], flat63[step * i + 1], step === 3 ? flat63[step * i + 2] : 0]);
+  const wrist = pts[0];
+  pts.forEach((p) => {
+    p[0] -= wrist[0];
+    p[1] -= wrist[1];
+    p[2] -= wrist[2];
+  });
+  const span = Math.hypot(pts[9][0], pts[9][1], pts[9][2]) || 1e-5;
+  pts.forEach((p) => {
+    p[0] /= span;
+    p[1] /= span;
+    p[2] /= span;
+  });
+  return Float32Array.from(pts.flat());
+}
 
+/* ──────────────────────────────────────────────────────────
+   Vanilla K‑NN predictor factory
+ ────────────────────────────────────────────────────────── */
+function makeKnnPredict({ k, X, y, labels }) {
+  return (sample) => {
+    // k개만 유지
+    const best = Array.from({ length: k }, () => [Infinity, -1]); // [dist, idx]
+
+    for (let idx = 0; idx < X.length; idx++) {
+      const ex = X[idx];
+      let sum = 0;
+      for (let j = 0; j < 63; j++) {
+        const d = sample[j] - ex[j];
+        sum += d * d;
+      }
+      const dist = Math.sqrt(sum);
+      if (dist < best[k - 1][0]) {
+        best[k - 1] = [dist, idx];
+        best.sort((a, b) => a[0] - b[0]); // k가 작으니 이 정도 정렬은 OK
+      }
+    }
+
+    const minDist = best[0][0];
+    const THRESH = 4; // 일단 이 정도로. 필요하면 조절
+    if (minDist > THRESH) return 'unknown';
+
+    const votes = {};
+    for (const [, idx] of best) {
+      const lbl = labels[y[idx]];
+      votes[lbl] = (votes[lbl] || 0) + 1;
+    }
+    return Object.entries(votes).reduce(
+      (bestLbl, [lbl, v]) => (v > (votes[bestLbl] || 0) ? lbl : bestLbl),
+      ''
+    );
+  };
+}
+
+/* prettier hand overlay */
+const EDGES = [
+  [0, 1], [1, 2], [2, 3], [3, 4],
+  [0, 5], [5, 6], [6, 7], [7, 8],
+  [5, 9], [9, 10], [10, 11], [11, 12],
+  [9, 13], [13, 14], [14, 15], [15, 16],
+  [13, 17], [17, 18], [18, 19], [19, 20],
+  [0, 17],
+];
+function drawHand(ctx, lm, w, h) {
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = 'rgba(0,255,127,0.9)';
+  ctx.fillStyle = 'rgba(0,255,127,1)';
+  EDGES.forEach(([i, j]) => {
+    ctx.beginPath();
+    ctx.moveTo((1-lm[i].x) * w, lm[i].y * h);
+    ctx.lineTo((1-lm[j].x) * w, lm[j].y * h);
+    ctx.stroke();
+  });
+  for (const p of lm) {
+    ctx.beginPath();
+    ctx.arc((1-p.x) * w, p.y * h, 6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+/* ──────────────────────────────────────────────────────────
+   MAIN COMPONENT
+ ────────────────────────────────────────────────────────── */
+export default function VideoRoom() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  const [handLandmarker, setHandLandmarker] = useState(null);
-  const [gestureModel, setGestureModel] = useState(null);
-  const [actions, setActions] = useState([]); // 학습된 제스처 이름 목록
-  const [isCameraOn, setIsCameraOn] = useState(true);
-  const [isMicOn, setIsMicOn] = useState(true);
-  const [volume, setVolume] = useState(1.0);
-  const [cursorPosition, setCursorPosition] = useState({ x: 0, y: 0 });
+  const landmarkerRef = useRef(null);
+  const predictRef = useRef(null);
+
+  const navigate = useNavigate();
+  const { roomId } = useParams();
+
+  const [participants] = useState([]);
+  const [roomInfo] = useState({ name: `Room ${roomId || ''}` });
+
+  /* UI states */
+  const [currentGestureText, setCurrentGestureText] = useState('제스처 없음');
   const [isCursorVisible, setIsCursorVisible] = useState(false);
   const [isGrabbing, setIsGrabbing] = useState(false);
-  const [stickerPosition, setStickerPosition] = useState({ x: 50, y: 50 });
-  const [stickerSize, setStickerSize] = useState(50);
+  const [cursorPosition, setCursorPosition] = useState({ x: 0, y: 0 });
+
+  const [isCameraOn, setIsCameraOn] = useState(true);
+  const [isMicOn, setIsMicOn] = useState(true);
+  const [showLandmarks, setShowLandmarks] = useState(false);
   const [isDrawingMode, setIsDrawingMode] = useState(false);
-  const [isPainting, setIsPainting] = useState(false);
-  const [isVideoReady, setIsVideoReady] = useState(false); // 카메라 준비 상태 추가
-  const [lines, setLines] = useState([]);
-  const [color, setColor] = useState('#000000');
-  const [lineWidth, setLineWidth] = useState(5);
-  const [detectionResults, setDetectionResults] = useState(null);
-  const [showLandmarks, setShowLandmarks] = useState(true);
-  const [currentGestureText, setCurrentGestureText] = useState('제스처 없음');
-  const lastGesture = useRef(null);
-  const gestureTimeout = useRef(null);
-  const exitTimeout = useRef(null);
-  const prevGestureRef = useRef(null);
+  const [color, setColor] = useState('#ff5722');
+  const [lineWidth, setLineWidth] = useState(4);
 
-  const toggleCamera = (status) => {
-    if (videoRef.current && videoRef.current.srcObject) {
-      const tracks = videoRef.current.srcObject.getVideoTracks();
-      if (tracks.length > 0) {
-        tracks[0].enabled = status;
-        setIsCameraOn(status);
-      }
-    }
-  };
-
-  const toggleMic = () => {
-    setIsMicOn(prev => !prev);
-  };
-
-  const changeVolume = (amount) => {
-    setVolume(prev => Math.max(0, Math.min(1, prev + amount)));
-  };
-
-  const handleLeaveRoom = () => {
-    navigate('/main');
-  };
-
-  // 제스처 기반 그리기 로직 (모델 예측 사용)
-  useEffect(() => {
-    if (!isDrawingMode || !detectionResults || !detectionResults.landmarks || detectionResults.landmarks.length === 0) return;
-
-    const currentGesture = currentGestureText;
-    const landmarks = detectionResults.landmarks[0];
-    const cursorX = landmarks[8].x * canvasRef.current.width;
-    const cursorY = landmarks[8].y * canvasRef.current.height;
-
-    if (currentGesture === 'grab') {
-      if (!isPainting) {
-        setLines(prevLines => [...prevLines, { points: [{ x: cursorX, y: cursorY }], color, lineWidth }]);
-        setIsPainting(true);
-      } else {
-        setLines(prevLines => {
-          const lastLine = prevLines[prevLines.length - 1];
-          const newPoints = [...lastLine.points, { x: cursorX, y: cursorY }];
-          const newLine = { ...lastLine, points: newPoints };
-          return [...prevLines.slice(0, -1), newLine];
-        });
-      }
-    } else {
-      if (isPainting) {
-        setIsPainting(false);
-      }
-    }
-  }, [detectionResults, isDrawingMode, currentGestureText, color, lineWidth, isPainting]);
-
-  const clearCanvas = () => {
-    setLines([]);
-  };
-
-  // 제스처에 따른 액션 처리 (커서, 볼륨 등)
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    if (!detectionResults || !detectionResults.landmarks || detectionResults.landmarks.length === 0) {
-      setIsCursorVisible(false);
-      return;
-    }
-
-    const landmarks = detectionResults.landmarks[0];
-    const cursorX = (1 - landmarks[8].x) * canvas.clientWidth;
-    const cursorY = landmarks[8].y * canvas.clientHeight;
-
-    // 제스처가 변경될 때만 특정 액션(클릭, 토글)을 트리거
-    if (prevGestureRef.current !== currentGestureText) {
-      if (currentGestureText === 'grab' && !isDrawingMode) {
-        // 현재 커서 위치의 엘리먼트를 찾아서 클릭
-        const clickElem = document.elementFromPoint(cursorX, cursorY);
-        if (clickElem) {
-          // 클릭 가능한 요소인지 확인 (예: button, a 등)
-          if (typeof clickElem.click === 'function') {
-            clickElem.click();
-            console.log("Clicked element:", clickElem);
-          }
-        }
-      } else if (currentGestureText === 'draw_mode') {
-        setIsDrawingMode(prev => !prev);
-      }
-    }
-    prevGestureRef.current = currentGestureText;
-    
-    // 제스처별 액션 분기
-    switch (currentGestureText) {
-      case 'cursor':
-      case 'draw_mode':
-        setCursorPosition({ x: cursorX, y: cursorY });
-        setIsCursorVisible(true);
-        setIsGrabbing(false);
-        break;
-      
-      case 'grab':
-        setCursorPosition({ x: cursorX, y: cursorY });
-        setIsCursorVisible(true);
-        setIsGrabbing(true);
-        break;
-
-      // TODO: 아래 제스처들에 대한 실제 액션 함수를 연결해야 합니다.
-      case 'volume_up':
-        // 예: changeVolume(0.1);
-        console.log("Volume Up");
-        setIsCursorVisible(false);
-        break;
-      
-      case 'volume_down':
-        // 예: changeVolume(-0.1);
-        console.log("Volume Down");
-        setIsCursorVisible(false);
-        break;
-        
-      case 'mute':
-        // 예: toggleMic();
-        console.log("Mute");
-        setIsCursorVisible(false);
-        break;
-
-      default:
-        // 그 외 모든 제스처는 커서를 숨깁니다.
-        setIsCursorVisible(false);
-        break;
-    }
-    
-  }, [currentGestureText, detectionResults, isDrawingMode]);
-
-  // MediaPipe 및 제스처 모델 초기화
-  useEffect(() => {
-    const loadModels = async () => {
-      try {
-        const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
-        const newHandLandmarker = await HandLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
-            delegate: "GPU"
-          },
-          runningMode: "VIDEO",
-          numHands: 2
-        });
-        setHandLandmarker(newHandLandmarker);
-        console.log("Hand Landmarker 로드 완료.");
-
-        console.log("TensorFlow.js 모델 로딩 시작...");
-        const model = await tf.loadGraphModel('/tfjs_model/model.json'); // loadLayersModel -> loadGraphModel로 변경
-        setGestureModel(model);
-        console.log("TensorFlow.js 모델 로딩 성공.");
-        
-        // Python 학습 스크립트의 정렬된 순서와 동일하게 설정
-        const actionList = ['camera_toggle', 'cursor', 'draw_mode', 'exit_room', 'grab', 'mute', 'resize', 'volume_down', 'volume_up'];
-        setActions(actionList);
-        console.log("학습된 제스처 목록:", actionList);
-
-      } catch (error) {
-        console.error("AI 모델 로딩 중 오류 발생:", error);
-      }
-    };
-    loadModels();
+  /* media helpers */
+  const toggleCamera = useCallback((on) => {
+    setIsCameraOn(on);
+    const track = videoRef.current?.srcObject?.getVideoTracks?.()[0];
+    if (track) track.enabled = on;
   }, []);
 
-  // 1. 웹캠 스트림 즉시 설정
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    const enableWebcam = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        video.srcObject = stream;
-        video.addEventListener('loadeddata', () => {
-          setIsVideoReady(true);
-          console.log("카메라 준비 완료.");
-        });
-      } catch (err) {
-        console.error("Error accessing webcam: ", err);
-      }
-    };
-
-    enableWebcam();
-
-    return () => {
-      if (video.srcObject) {
-        video.srcObject.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, []);
-
-  // 2. 모델 로드 및 카메라 준비 완료 후 제스처 감지 루프 시작
-  useEffect(() => {
-    if (!handLandmarker || !gestureModel || !isVideoReady) return;
-
-    const video = videoRef.current;
-    let animationFrameId;
-    let lastTs = -1;
-    const predictWebcam = () => {
-      if (video.readyState >= 2) {
-        // const videoTimeMs = video.currentTime * 1000;
-        let ts = Math.round(video.currentTime * 1000);
-
-        // 2) 이전 값과 같거나 작으면 +1 ms 보정
-        if (ts <= lastTs) ts = lastTs + 1;
-        lastTs = ts;
-        const results = handLandmarker.detectForVideo(video, lastTs);
-        setDetectionResults(results);
-        
-        if (results.landmarks && results.landmarks.length > 0 && actions.length > 0) {
-          try {
-            const landmarks = results.landmarks[0].flatMap(lm => [lm.x, lm.y, lm.z]);
-            const inputTensor = tf.tensor2d([landmarks]);
-            
-            const prediction = gestureModel.predict(inputTensor);
-            const predictedIndex = prediction.argMax(1).dataSync()[0];
-            const predictedGesture = actions[predictedIndex];
-            
-            if (predictedGesture !== lastGesture.current) {
-              clearTimeout(gestureTimeout.current);
-              lastGesture.current = predictedGesture;
-              gestureTimeout.current = setTimeout(() => {
-                setCurrentGestureText(predictedGesture);
-              }, 1000);
-            }
-            
-            tf.dispose([inputTensor, prediction]);
-          } catch (error) {
-            console.error("제스처 예측 중 오류:", error);
-          }
-        } else {
-          clearTimeout(gestureTimeout.current);
-          lastGesture.current = null;
-          setCurrentGestureText('제스처 없음');
-        }
-      }
-      animationFrameId = requestAnimationFrame(predictWebcam);
-    };
-
-    console.log("제스처 예측 시작.");
-    predictWebcam();
-
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-    };
-  }, [handLandmarker, gestureModel, isVideoReady, actions]);
-
-  // 캔버스 렌더링
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const context = canvas.getContext('2d');
-    
-    const parent = canvas.parentElement;
-    if (parent) {
-      canvas.width = parent.clientWidth;
-      canvas.height = parent.clientHeight;
-    }
-
-    context.clearRect(0, 0, canvas.width, canvas.height);
-
-    // 랜드마크 그리기 (가장 확실한 표준 방식)
-    if (showLandmarks && detectionResults && detectionResults.landmarks) {
-      const drawingUtils = new DrawingUtils(context);
-      for (const landmarks of detectionResults.landmarks) {
-        drawingUtils.drawConnectors(landmarks, HandLandmarker.HAND_CONNECTIONS, { color: "#00E0FF", lineWidth: 3 });
-        drawingUtils.drawLandmarks(landmarks, { color: "#FFB700", radius: 4 });
-      }
-    }
-
-    // 그린 선들 렌더링
-    lines.forEach(line => {
-      context.strokeStyle = line.color;
-      context.lineWidth = line.lineWidth;
-      context.lineCap = 'round';
-      context.lineJoin = 'round';
-      context.beginPath();
-      line.points.forEach((point, index) => {
-        if (index === 0) context.moveTo(point.x, point.y);
-        else context.lineTo(point.x, point.y);
-      });
-      context.stroke();
+  const toggleMic = useCallback(() => {
+    setIsMicOn((prev) => {
+      const next = !prev;
+      const track = videoRef.current?.srcObject?.getAudioTracks?.()[0];
+      if (track) track.enabled = next;
+      return next;
     });
-  }, [lines, detectionResults, showLandmarks]);
+  }, []);
 
+  const handleLeaveRoom = useCallback(() => navigate('/'), [navigate]);
+
+  const clearCanvas = useCallback(() => {
+    const ctx = canvasRef.current?.getContext('2d');
+    if (ctx) ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+  }, []);
+
+  /* load KNN */
+  useEffect(() => {
+    fetch('/models/knn_model.json')
+      .then((r) => r.json())
+      .then((data) => {
+        data.X = data.X.map((v) => Float32Array.from(v));
+        predictRef.current = makeKnnPredict(data);
+      });
+  }, []);
+
+  /* init mediapipe */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const WASM_ROOT = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm';
+      const MODEL_PATH = process.env.PUBLIC_URL + '/models/hand_landmarker.task';
+      const fs = await FilesetResolver.forVisionTasks(WASM_ROOT);
+      const lm = await HandLandmarker.createFromOptions(fs, {
+        baseOptions: { modelAssetPath: MODEL_PATH },
+        numHands: 1,
+        runningMode: 'VIDEO',
+      });
+      if (!cancelled) landmarkerRef.current = lm;
+    })();
+    return () => {
+      cancelled = true;
+      landmarkerRef.current?.close();
+    };
+  }, []);
+
+  /* webcam */
+  useEffect(() => {
+    let stream;
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((s) => {
+      stream = s;
+      videoRef.current.srcObject = s;
+    });
+    return () => stream?.getTracks().forEach((t) => t.stop());
+  }, []);
+
+  /* gesture actions */
+  const applyGesture = useCallback(
+    (g) => {
+      switch (g) {
+        case 'volume_up':
+          videoRef.current.volume = Math.min(1, videoRef.current.volume + 0.1);
+          break;
+        case 'volume_down':
+          videoRef.current.volume = Math.max(0, videoRef.current.volume - 0.1);
+          break;
+        case 'mute':
+          toggleMic();
+          break;
+        case 'cam_toggle':
+          toggleCamera(!isCameraOn);
+          break;
+        case 'exit_room':
+          handleLeaveRoom();
+          break;
+        case 'cursor':
+          setIsCursorVisible(true);
+          setIsGrabbing(false);
+          break;
+        case 'grab':
+          setIsCursorVisible(true);
+          setIsGrabbing(true);
+          break;
+        case 'draw_mode':
+          setIsDrawingMode((p) => !p);
+          setIsCursorVisible(false);
+          setIsGrabbing(false);
+          break;
+        default:
+          break;
+      }
+    },
+    [isCameraOn, toggleMic, toggleCamera, handleLeaveRoom]
+  );
+
+  /* main loop */
+  useEffect(() => {
+    if (!landmarkerRef.current || !predictRef.current) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    // 비디오 메타데이터 로드된 직후(landmarker 루프 시작 전에 한 번만)
+    const vw = videoRef.current.videoWidth;
+    const vh = videoRef.current.videoHeight;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.style.width = `${vw}px`;
+    canvas.style.height = `${vh}px`;
+    canvas.width  = vw * dpr;
+    canvas.height = vh * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const gestureHoldMs = 1000;
+    let lastGesture = '';
+    let holdStart = 0;
+    let lastFinger = null;
+
+    const loop = () => {
+      if (!videoRef.current || videoRef.current.readyState < 2) {
+        requestAnimationFrame(loop);
+        return;
+      }
+
+      const ts = performance.now();
+      const res = landmarkerRef.current.detectForVideo(videoRef.current, ts);
+
+      /* preserve existing drawing */
+      if (!isDrawingMode) {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+      /* landmarks */
+      if (showLandmarks && res.landmarks?.length) {
+        // ctx.save();
+        // ctx.translate(vw, 0);
+        // ctx.scale(-1, 1);
+        drawHand(ctx, res.landmarks[0], vw, vh);
+        // ctx.restore();
+      }
+
+      if (!res.landmarks?.length) {
+        setCurrentGestureText('손 미검출');
+        requestAnimationFrame(loop);
+        return;
+      }
+
+      /* mirror X for prediction */
+      const vec = Float32Array.from(res.landmarks[0].flatMap((p) => [1 - p.x, p.y]));
+      const gesture = predictRef.current(normalise(vec));
+
+      if (gesture !== lastGesture) {
+        lastGesture = gesture;
+        holdStart = ts;
+      }
+
+      setCurrentGestureText(gesture === 'unknown' ? '알 수 없음' : gesture);
+
+      if (ts - holdStart > gestureHoldMs && gesture !== 'unknown') {
+        applyGesture(gesture);
+      }
+
+      /* cursor & drawing */
+      const tip = res.landmarks[0][8];
+      const cx = (1 - tip.x) * canvas.width;
+      const cy = tip.y * canvas.height;
+      setCursorPosition({ x: cx, y: cy });
+
+      if (isDrawingMode) {
+        if (lastFinger) {
+          ctx.strokeStyle = color;
+          ctx.lineWidth = lineWidth;
+          ctx.beginPath();
+          ctx.moveTo(lastFinger.x, lastFinger.y);
+          ctx.lineTo(cx, cy);
+          ctx.stroke();
+        }
+        lastFinger = { x: cx, y: cy };
+      } else {lastFinger = null;}
+
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  }, [showLandmarks, isDrawingMode, color, lineWidth, applyGesture]);
+
+  /* ──────────────────────────────────────────────────────────
+     JSX – layout unchanged
+ ────────────────────────────────────────────────────────── */
   return (
     <div className="video-room-container">
+      <canvas ref={canvasRef} className="overlay-canvas" />
       <header className="room-header">
         <h2>{roomInfo ? roomInfo.name : '로딩 중...'}</h2>
       </header>
       <div className="main-content-wrapper">
         <div className="video-grid-main">
           <div className="participant-view local">
-            <video ref={videoRef} autoPlay playsInline muted className="video-feed"></video>
-            <canvas ref={canvasRef} className="output_canvas"></canvas>
+            <video ref={videoRef} autoPlay playsInline muted className="video-feed" />
             <div className="gesture-display">{currentGestureText}</div>
-            {isCursorVisible && <div className={`cursor ${isGrabbing ? 'grabbing' : ''}`} style={{ left: `${cursorPosition.x}px`, top: `${cursorPosition.y}px` }}></div>}
-            <div 
-              className="sticker" 
-              style={{ 
-                left: `${stickerPosition.x}px`, 
-                top: `${stickerPosition.y}px`,
-                width: `${stickerSize}px`,
-                height: `${stickerSize}px`,
-                fontSize: `${stickerSize * 0.8}px`
-              }}
-            >🎨</div>
+            {isCursorVisible && (
+              <div
+                className={`cursor ${isGrabbing ? 'grabbing' : ''}`}
+                style={{ left: `${cursorPosition.x}px`, top: `${cursorPosition.y}px` }}
+              />
+            )}
             <div className="participant-name">나</div>
           </div>
-          {participants.map(p => (
+          {participants.map((p) => (
             <ParticipantView key={p.id} name={p.name} />
           ))}
         </div>
-        <div className="chat-panel">
-        </div>
+        <div className="chat-panel" />
       </div>
       <div className="controls-bar">
-        {/* Left-aligned controls (empty for now) */}
-        <div className="control-group"></div>
-
-        {/* Center-aligned controls */}
+        <div className="control-group" />
         <div className="control-group control-buttons">
           <button onClick={() => toggleCamera(!isCameraOn)} title={isCameraOn ? '카메라 끄기' : '카메라 켜기'}>
             {isCameraOn ? '📷' : '📸'}
@@ -374,30 +354,28 @@ function VideoRoom() {
           <button onClick={toggleMic} title={isMicOn ? '마이크 끄기' : '마이크 켜기'}>
             {isMicOn ? '🎤' : '🔇'}
           </button>
-          <button onClick={() => setIsDrawingMode(prev => !prev)} title={isDrawingMode ? '그리기 종료' : '그리기 시작'}>
+          <button onClick={() => setIsDrawingMode((p) => !p)} title={isDrawingMode ? '그리기 종료' : '그리기 시작'}>
             ✏️
           </button>
-          <button onClick={() => setShowLandmarks(prev => !prev)} title={showLandmarks ? '관절 숨기기' : '관절 보이기'}>
+          <button onClick={() => setShowLandmarks((p) => !p)} title={showLandmarks ? '관절 숨기기' : '관절 보이기'}>
             🖐️
           </button>
         </div>
-
-        {/* Right-aligned controls */}
         <div className="control-group">
-          <button className="leave-btn" onClick={handleLeaveRoom} title="나가기">🚪 나가기</button>
+          <button className="leave-btn" onClick={handleLeaveRoom} title="나가기">
+            🚪 나가기
+          </button>
         </div>
-
-        {/* Drawing tools palette */}
         {isDrawingMode && (
           <div className="drawing-controls">
             <input type="color" value={color} onChange={(e) => setColor(e.target.value)} title="색상 선택" />
-            <input type="range" min="1" max="20" value={lineWidth} onChange={(e) => setLineWidth(e.target.value)} title="선 굵기" />
-            <button onClick={clearCanvas} title="전체 지우기">🗑️</button>
+            <input type="range" min="1" max="20" value={lineWidth} onChange={(e) => setLineWidth(Number(e.target.value))} title="선 굵기" />
+            <button onClick={clearCanvas} title="전체 지우기">
+              🗑️
+            </button>
           </div>
         )}
       </div>
     </div>
   );
 }
-
-export default VideoRoom;
