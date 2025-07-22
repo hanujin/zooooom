@@ -2,20 +2,22 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './../styles/Main.css';
 import CreateRoomModal from './../components/CreateRoomModal';
+import JoinRoomModal from './../components/JoinRoomModal';
 import FerrisWheel from './../components/FerrisWheel';
 import RollerCoaster from './../components/RollerCoaster'; // RollerCoaster 컴포넌트 import
 
 function Main() {
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isJoinOpen, setIsJoinOpen] = useState(false);
+
   const [userProfile, setUserProfile] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
   }, [navigate]);
 
-  const handleCreateRoom = () => {
-    setIsModalOpen(true);
-  };
+  const handleCreateRoom = () => setIsCreateOpen(true);
+  const handleJoinRoom   = () => setIsJoinOpen(true);
 
   const handleLogout = () => {
     localStorage.removeItem('accessToken');
@@ -41,6 +43,7 @@ function Main() {
           <h1>Zoooooom</h1>
           <div className="header-buttons">3
             {userProfile && <span className="user-greeting">{userProfile.nickname || userProfile.name}님, 환영합니다!</span>}
+            <button className="join-room-btn" onClick={handleJoinRoom}>기존 놀이기구 탑승</button>
             <button className="create-room-btn" onClick={handleCreateRoom}>+ 새 놀이기구 탑승</button>
             <button className="mypage-btn" onClick={() => navigate('/mypage')}>마이페이지</button>
           </div>
@@ -54,8 +57,13 @@ function Main() {
       </div>
 
       <CreateRoomModal 
-        isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
+        isOpen={isCreateOpen} 
+        onClose={() => setIsCreateOpen(false)} 
+      />
+
+      <JoinRoomModal 
+        isOpen={isJoinOpen} 
+        onClose={() => setIsJoinOpen(false)} 
       />
     </>
   );

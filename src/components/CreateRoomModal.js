@@ -1,8 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import apiClient from './../api/index';
 
 function CreateRoomModal({ isOpen, onClose }) {
   const [roomId, setRoomId] = useState('');
+  const [title, setTitle] = useState('');
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [password, setPassword] = useState('');
   const navigate = useNavigate();
 
   const generateRandomId = () => {
@@ -30,11 +34,23 @@ function CreateRoomModal({ isOpen, onClose }) {
     return null;
   }
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    alert(`방이 생성되었습니다. 방으로 입장합니다. (ID: ${roomId})`);
-    onClose();
-    navigate(`/rooms/${roomId}`);
+   try {
+     // POST to backend
+     const body = {
+       meetingCode: roomId,
+       title,
+       isPublic: !isPrivate,
+       joinPassword: isPrivate ? password : undefined, // backend will hash
+     };
+     const { data } = await apiClient.post('/rooms', body);
+     const dest = `/rooms/${data.id || roomId}`;
+     onClose();
+     navigate(dest);
+   } catch (err) {
+     alert(err.response?.data || err.message);
+   }
   };
 
   return (
@@ -49,13 +65,46 @@ function CreateRoomModal({ isOpen, onClose }) {
         
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label htmlFor="room-name">방 이름</label>
-            <input type="text" id="room-name" required />
+           <label>공개 여부</label>
+           <div style={{ display: 'flex', gap: '12px', marginTop: '4px' }}>
+             <label>
+               <input
+                 type="radio"
+                 name="privacy"
+                 value="public"
+                 checked={!isPrivate}
+                 onChange={() => setIsPrivate(false)}
+               />
+               공개
+             </label>
+             <label>
+               <input
+                 type="radio"
+                 name="privacy"
+                 value="private"
+                 checked={isPrivate}
+                 onChange={() => setIsPrivate(true)}
+               />
+               비공개
+             </label>
+            </div>
           </div>
           <div className="form-group">
-            <label htmlFor="room-password">비밀번호 (선택 사항)</label>
-            <input type="password" id="room-password" />
+            <label htmlFor="room-name">방 이름</label>
+            <input type="text" id="room-name" value={title} onChange = {(e) => setTitle(e.target.value)} required />
           </div>
+          {isPrivate && (
+           <div className="form-group">
+             <label htmlFor="room-password">비밀번호</label>
+             <input
+               type="password"
+               id="room-password"
+               value={password}
+               onChange={(e) => setPassword(e.target.value)}
+               required
+             />
+           </div>
+         )}
           <button type="submit" className="primary-btn">만들기</button>
         </form>
       </div>

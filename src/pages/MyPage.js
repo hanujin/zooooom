@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import '../styles/Main.css';
 import '../styles/MyPage.css';
+import { API_BASE } from '../config';
+import apiClient from '../api/index';
 
 const Ticket = ({ ticket, isFlipped, onFlip, onTicketClick }) => {
   const formatDate = (dateString) => {
@@ -38,7 +40,10 @@ const Ticket = ({ ticket, isFlipped, onFlip, onTicketClick }) => {
 };
 
 const MyPage = () => {
-  const [userProfile, setUserProfile] = useState(null);
+  const [userProfile, setUserProfile] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('user')); } catch { return null; }
+  });
+  const [loading, setLoading] = useState(true);
   const [tickets, setTickets] = useState([]);
   const [flippedTickets, setFlippedTickets] = useState({});
   const [selectedTicket, setSelectedTicket] = useState(null);
@@ -54,7 +59,33 @@ const MyPage = () => {
       { id: 6, title: 'Ticket 6', date: new Date().toISOString(), image: '/images/ticket6.png', text: '' },
     ];
     setTickets(staticTickets);
-  }, []);
+    const token = localStorage.getItem('token');
+    if (!token) {
+      navigate('/');
+      return;
+    }
+
+    (async () => {
+      try {
+       // Decode JWT to get user id (sub)
+       const payload = JSON.parse(atob(token.split('.')[1]));
+       const userId = payload.sub;
+       const res = await fetch(`${API_BASE}/users/${userId}`, {
+         headers: { Authorization: `Bearer ${token}` },
+       });
+      // const res = await apiClient.get(`/users/${userId}`);
+       if (!res.ok) throw new Error(await res.text());
+       const profile = await res.json();
+       setUserProfile(profile);
+       localStorage.setItem('user', JSON.stringify(profile)); // optional cache
+     } catch (err) {
+       console.error(err);
+       navigate('/'); // token invalid/expired -> back to login
+     } finally {
+        setLoading(false);
+     }
+   })();
+  }, [navigate]);
 
   const handleFlip = (ticketId) => {
     setFlippedTickets(prev => ({
@@ -82,6 +113,7 @@ const MyPage = () => {
     setFlippedTickets({});
   };
 
+  // if (loading) return <div className="mypage-container">Loading...</div>;
   return (
     <div className="amusement-park-theme" style={{ minHeight: '100vh' }}>
       <header className="main-header">
@@ -94,8 +126,8 @@ const MyPage = () => {
       <main className="mypage-main-content">
         <div className="user-info">
           <h2>My page</h2>
-          <p><strong>Name:</strong> John Doe</p>
-          <p><strong>Email:</strong> john.doe@example.com</p>
+          <p><strong>Name:</strong> {userProfile?.name ?? ''}</p>
+          <p><strong>Email:</strong> {userProfile?.email ?? ''} </p>
         </div>
         <div className="tickets-section">
           <div className="tickets-header">

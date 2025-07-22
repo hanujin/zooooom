@@ -1,19 +1,15 @@
+// src/apiClient.js  (rename from index.js for clarity)
 import axios from 'axios';
-
-const API_BASE_URL = 'http://localhost:8080'; // 백엔드 서버 주소에 맞게 변경
+import { API_BASE } from '../config';
 
 const apiClient = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  baseURL: API_BASE,
+  headers: { 'Content-Type': 'application/json' },
 });
 
-apiClient.interceptors.request.use(config => {
-  const token = localStorage.getItem('accessToken');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
+apiClient.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token'); // make this match your Login.js
+  if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
 });
 
