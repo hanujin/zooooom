@@ -1,5 +1,6 @@
 import AuthForm from '../components/AuthForm';
 import { useNavigate } from 'react-router-dom';
+import '../styles/Main.css';
 
 function Login() {
   const navigate = useNavigate();
@@ -12,7 +13,7 @@ function Login() {
   };
 
   return (
-    <div className="login-card">
+    <div className="login-card amusement-park-theme">
       <img src="/logo.png" alt="Zoooooom!" className="brand-logo" />
       <AuthForm
         type="login"
