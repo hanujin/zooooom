@@ -70,6 +70,21 @@
       border: 2px dashed #ccc;
       border-radius: 5px;
       margin-right: 1rem;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+  }
+  
+  .captured-photo {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .no-photo-text {
+    color: #888;
+    font-size: 0.9rem;
   }
   
   .details-right {

@@ -89,6 +89,9 @@ const VideoRoom = () => {
   const [muted, setMuted] = useState(false);
   const [drawMode, setDrawMode] = useState(false);
   const [showLandmarks, setShowLandmarks] = useState(false);
+  const [capturedPhoto, setCapturedPhoto] = useState(null);   // add
+  const photoCanvasRef = useRef(null);                        // add
+
 
   // const localVideoRef = useRef(null);
   // const remoteVideoRef = useRef(null);
@@ -514,6 +517,31 @@ const VideoRoom = () => {
     setMuted(!next);
   };
 
+  const takePhoto = () => {
+    const ownerVideo = ownerVideoRef.current;
+    const participantVideo = participantVideoRef.current;
+    const canvas = photoCanvasRef.current;
+
+    if (!ownerVideo || !participantVideo || !canvas) {
+      alert('두 명의 비디오가 모두 활성화되어야 캡처할 수 있습니다.');
+      return;
+    }
+
+    const w = ownerVideo.videoWidth;
+    const h = ownerVideo.videoHeight;
+    canvas.width  = w * 2;
+    canvas.height = h;
+
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(ownerVideo,       0, 0, w, h);
+    ctx.drawImage(participantVideo, w, 0, w, h);
+
+    const dataUrl = canvas.toDataURL('image/png');
+    setCapturedPhoto(dataUrl);
+    alert('두 명의 화면이 캡처되었습니다! 방을 나가면 티켓에 저장됩니다.');
+  };
+
+
   const leaveRoom = async () => {
   try {
     if (iAmOwner && room) {
@@ -526,6 +554,29 @@ const VideoRoom = () => {
   } catch (e) {
     console.error('delete/leave failed', e?.response?.data || e);
   } finally {
+    // ----- Save ticket to localStorage -----
+const ticketImages = [
+  '/images/ticket1.png','/images/ticket2.png','/images/ticket3.png',
+  '/images/ticket4.png','/images/ticket5.png','/images/ticket6.png'
+];
+const randomTicketImage = ticketImages[Math.floor(Math.random() * ticketImages.length)];
+
+const newTicket = {
+  id: room?.id || Date.now(),
+  date: new Date().toISOString(),
+  image: randomTicketImage,      // front image
+  capturedPhoto: capturedPhoto || null, // the canvas screenshot
+  title: room?.name || 'Untitled Room',
+  text: '',
+};
+
+try {
+  const existing = JSON.parse(localStorage.getItem('tickets')) || [];
+  localStorage.setItem('tickets', JSON.stringify([...existing, newTicket]));
+} catch (e) {
+  console.error('Error saving ticket', e);
+}
+
     navigate('/main'); // <-- your real main page route
   }
 };
@@ -556,7 +607,7 @@ const VideoRoom = () => {
 
          <canvas ref={canvasRef} className="draw-layer" style={{pointerEvents:'none'}} />
       </div>
-
+      <canvas ref={photoCanvasRef} style={{ display: 'none' }} />
       <aside className="chat-panel">
         <div className="chat-messages">
           {messages.map((m, i) => (
@@ -586,6 +637,7 @@ const VideoRoom = () => {
         <button onClick={toggleMute} title="Toggle Mute">{muted ? '🔇' : '🎤'}</button>
         <button onClick={() => setDrawMode((v) => !v)} title="Draw Mode">✏️</button>
         <button onClick={() => setShowLandmarks((v) => !v)} title="Show Landmarks">🖐️</button>
+        <button onClick={takePhoto} title="Take Photo">📸</button>
         <button className="leave-btn" onClick={leaveRoom}>나가기</button>
       </div>
       <canvas

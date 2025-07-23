@@ -19,7 +19,11 @@ const Ticket = ({ ticket, isFlipped, onFlip, onTicketClick }) => {
       <div className="ticket-back">
         <div className="ticket-back-content">
           <div className="photo-placeholder-left">
-            {/* 사진 공간 */}
+            {ticket.capturedPhoto ? (
+              <img src={ticket.capturedPhoto} alt="Captured moment" className="captured-photo" />
+            ) : (
+              <div className="no-photo-text">캡처된 사진이 없습니다.</div>
+            )}
           </div>
           <div className="details-right">
             <div className="date-info">
@@ -50,15 +54,15 @@ const MyPage = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const staticTickets = [
-      { id: 1, title: 'Ticket 1', date: new Date().toISOString(), image: '/images/ticket1.png', text: '' },
-      { id: 2, title: 'Ticket 2', date: new Date().toISOString(), image: '/images/ticket2.png', text: '' },
-      { id: 3, title: 'Ticket 3', date: new Date().toISOString(), image: '/images/ticket3.png', text: '' },
-      { id: 4, title: 'Ticket 4', date: new Date().toISOString(), image: '/images/ticket4.png', text: '' },
-      { id: 5, title: 'Ticket 5', date: new Date().toISOString(), image: '/images/ticket5.png', text: '' },
-      { id: 6, title: 'Ticket 6', date: new Date().toISOString(), image: '/images/ticket6.png', text: '' },
-    ];
-    setTickets(staticTickets);
+    // Load tickets from localStorage
+    try {
+      const storedTickets = JSON.parse(localStorage.getItem('tickets')) || [];
+      setTickets(storedTickets);
+    } catch (error) {
+      console.error("Error loading tickets from localStorage", error);
+      setTickets([]);
+    }
+
     const token = localStorage.getItem('token');
     if (!token) {
       navigate('/');
@@ -155,7 +159,11 @@ const MyPage = () => {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="ticket-back-content">
               <div className="photo-placeholder-left">
-                {/* 사진 공간 */}
+                {selectedTicket.capturedPhoto ? (
+                  <img src={selectedTicket.capturedPhoto} alt="Captured moment" className="captured-photo" />
+                ) : (
+                  <div className="no-photo-text">캡처된 사진이 없습니다.</div>
+                )}
               </div>
               <div className="details-right">
                 <div className="date-info">
