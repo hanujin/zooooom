@@ -45,9 +45,11 @@ function CreateRoomModal({ isOpen, onClose }) {
        joinPassword: isPrivate ? password : undefined, // backend will hash
      };
      const { data } = await apiClient.post('/rooms', body);
-     const dest = `/rooms/${data.id || roomId}`;
+     const dest = `/rooms/${data.meetingCode || roomId}`;
+     navigate(dest, {
+      state: { role: 'owner', password: isPrivate ? password : undefined },
+    });
      onClose();
-     navigate(dest);
    } catch (err) {
      alert(err.response?.data || err.message);
    }

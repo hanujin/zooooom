@@ -34,7 +34,9 @@ function JoinRoomModal({ isOpen, onClose }) {
         password: needsPw ? password : undefined,
       });
       onClose();
-      navigate(`/rooms/${data.id}`);
+      navigate(`/rooms/${meetingCode}`, {
+       state: { role: 'participant', password: needsPw ? password : undefined },
+      });
     } catch (err) {
       alert(err.response?.data || err.message);
     }
