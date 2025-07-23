@@ -16,6 +16,65 @@ import '../styles/VideoRoom.css';
  * an "isOwner" flag passed in router state/query when you create/join.
  */
 
+// Mediapipe hand skeleton pairs
+const HAND_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,4],
+  [0,5],[5,6],[6,7],[7,8],
+  [5,9],[9,10],[10,11],[11,12],
+  [9,13],[13,14],[14,15],[15,16],
+  [13,17],[17,18],[18,19],[19,20],
+  [0,17]
+];
+
+function normalise63(flat63) {
+  // flat63: Float32Array length 63 (x0,y0,z0,...)
+  const pts = new Float32Array(63);
+  pts.set(flat63);
+
+  // center on wrist (0)
+  const wx = pts[0], wy = pts[1], wz = pts[2];
+  for (let i = 0; i < 63; i += 3) {
+    pts[i]   -= wx;
+    pts[i+1] -= wy;
+    pts[i+2] -= wz;
+  }
+
+  // scale by |LM0 -> LM9|
+  const dx = pts[9*3 + 0], dy = pts[9*3 + 1], dz = pts[9*3 + 2];
+  const span = Math.hypot(dx, dy, dz) || 1e-5;
+  for (let i = 0; i < 63; i++) pts[i] /= span;
+
+  return pts;
+}
+
+
+// simple KNN (brute-force) – fine for a few k-thousand vectors
+function knnPredict(vec, model, k = model.k) {
+  const { X, y, labels } = model;
+  // compute squared L2
+  const dists = [];
+  for (let i = 0; i < X.length; i++) {
+    let sum = 0;
+    const row = X[i];
+    for (let j = 0; j < 63; j++) {
+      const diff = vec[j] - row[j];
+      sum += diff * diff;
+    }
+    dists.push({ d: sum, label: y[i] });
+  }
+  dists.sort((a, b) => a.d - b.d);
+  const votes = {};
+  for (let i = 0; i < k; i++) {
+    const lbl = dists[i].label;
+    votes[lbl] = (votes[lbl] || 0) + 1;
+  }
+  let best = -1, bestCnt = -1;
+  for (const [lbl, cnt] of Object.entries(votes)) {
+    if (cnt > bestCnt) { bestCnt = cnt; best = +lbl; }
+  }
+  return labels[best];
+}
+
 function decodeUserIdFromToken() {
   try {
     const token = localStorage.getItem('token');
@@ -48,8 +107,19 @@ const VideoRoom = () => {
   const canvasRef = useRef(null);
   //// Hand landmarks
   const handsCanvasRef = useRef(null);
-  const handLandmarkerRef = useRef(null);
-  const rafIdRef = useRef(null);
+  const drawLandmarkerRef = useRef(null);
+  const drawRafRef = useRef(null);
+  const holdRef = useRef({ pred: null, since: 0, fired: false });
+
+  // CLASSIFY pipeline
+  const clsInitRef = useRef(false);
+  const clsLandmarkerRef = useRef(null);
+  const clsRafRef = useRef(null);
+
+  const knnModelRef = useRef(null);
+  const currentGestureRef = useRef(null);
+  const stableSinceRef = useRef(0);
+  const [gestureLabel, setGestureLabel] = useState(null);  // to show on UI
   ///
   const pcRef = useRef(null);
   const socketRef = useRef(null);
@@ -60,6 +130,45 @@ const VideoRoom = () => {
   const roleFromState = location.state?.role;
   const passwordFromState = location.state?.password;
   const [iAmOwner, setIAmOwner] = useState(false);
+
+  const changeVolume = (delta) => {
+    const vid = iAmOwner ? participantVideoRef.current : ownerVideoRef.current;
+    if (!vid) return;
+    vid.volume = Math.min(1, Math.max(0, vid.volume + delta));
+  };
+
+
+  const triggerAction = (label) => {
+    switch (label) {
+      case 'volume_up':
+        // increase volume of remote video (example)
+        changeVolume(+0.1);
+        break;
+      case 'volume_down':
+        changeVolume(-0.1);
+        break;
+      case 'mute':
+        toggleMute(); // you already have this
+        break;
+      case 'cam_toggle':
+        toggleCamera();
+        break;
+      case 'exit_room':
+        leaveRoom();
+        break;
+      case 'cursor':
+        // TODO: later
+        break;
+      case 'grab':
+        // TODO
+        break;
+      case 'draw_mode':
+        setDrawMode(v => !v);
+        break;
+      default:
+        break;
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -188,6 +297,166 @@ const VideoRoom = () => {
     };
   }, [meetingCode, navigate]);
 
+  useEffect(() => {
+    (async () => {
+      const res = await fetch('/models/knn_model.json');
+      const model = await res.json();
+      // convert nested arrays to Float32Array for faster math
+      model.X = model.X.map(row => Float32Array.from(row));
+      model.y = Int16Array.from(model.y);
+      knnModelRef.current = model;
+      console.log('[KNN] model loaded', model.labels);
+    })();
+  }, []);
+
+  //-------- CLASSIFIERLOOP ------
+  useEffect(() => {
+    let run = true;
+    let rafId = 0;
+
+    function pickReadyVideo() {
+        const cand = [
+        ownerVideoRef.current,
+        participantVideoRef.current,
+      ].filter(v => v && v.readyState >= 2 && v.videoWidth > 0);
+      return cand[0] || null;
+    }
+
+    (async () => {
+      const fileset = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+      );
+      clsLandmarkerRef.current = await HandLandmarker.createFromOptions(fileset, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+        },
+        numHands: 1,
+        runningMode: "VIDEO",
+      });
+
+      const tick = () => {
+        if (!run) return;
+        rafId = requestAnimationFrame(tick);
+
+        const videoEl = pickReadyVideo();
+        if (!videoEl) {
+          return;
+        }
+        if (videoEl.paused) {
+          videoEl.play().catch(()=>{});
+        }
+        const ts = performance.now();
+        const res = clsLandmarkerRef.current.detectForVideo(videoEl, ts);
+        if (res?.landmarks?.length) {
+          const lm = res.landmarks[0];
+          const lm63 = new Float32Array(63);
+          for (let i = 0; i < 21; i++) {
+            const p = lm[i];
+            // mirror horizontally like your Python code (cv2.flip(frame,1))
+            lm63[i*3]   = 1 - p.x;
+            lm63[i*3+1] = p.y;
+            lm63[i*3+2] = p.z;
+          }
+          const norm = normalise63(lm63);
+
+          const model = knnModelRef.current;
+          if (model) {
+            const pred = knnPredict(norm, model);
+            const now = performance.now();
+            if (currentGestureRef.current !== pred) {
+              currentGestureRef.current = pred;
+              stableSinceRef.current = now;
+            } else if (now - stableSinceRef.current >= 250) {  // 0.8s stable
+              setGestureLabel(pred);
+              triggerAction(pred);
+              stableSinceRef.current = now;
+            }
+          }
+        } else { console.log('[CLS] no hand'); }
+      };
+      tick();
+    })();
+
+    return () => {
+      run = false;
+      cancelAnimationFrame(rafId);
+    };
+  }, []);
+
+  useEffect(()=>{ if(window.DEBUG_GES) console.log('LABEL->', gestureLabel); }, [gestureLabel]);
+
+  // ----------------- DRAW LOOP (only when showLandmarks) ----------
+  useEffect(() => {
+    // tear down
+    if (!showLandmarks) {
+      if (drawRafRef.current) cancelAnimationFrame(drawRafRef.current);
+      const ctx = handsCanvasRef.current?.getContext('2d');
+      if (ctx && handsCanvasRef.current) {
+        ctx.clearRect(0, 0, handsCanvasRef.current.width, handsCanvasRef.current.height);
+      }
+      return;
+    }
+
+    let run = true;
+    (async () => {
+      if (!drawLandmarkerRef.current) {
+        const fileset = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+        );
+        drawLandmarkerRef.current = await HandLandmarker.createFromOptions(fileset, {
+          baseOptions: {
+            modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+          },
+          numHands: 1,
+          runningMode: "VIDEO",
+        });
+      }
+
+      const videoEl = iAmOwner ? ownerVideoRef.current : participantVideoRef.current;
+      const canvasEl = handsCanvasRef.current;
+      const ctx = canvasEl.getContext('2d');
+
+      const resizeCanvas = () => {
+        canvasEl.width = window.innerWidth;
+        canvasEl.height = window.innerHeight;
+      };
+      resizeCanvas();
+      window.addEventListener('resize', resizeCanvas);
+
+      const loop = () => {
+        if (!run) return;
+        const ts = performance.now();
+        const res = drawLandmarkerRef.current.detectForVideo(videoEl, ts);
+
+        ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+        if (res?.landmarks?.length) {
+          const lmList = res.landmarks[0];
+          const pts = lmList.map(p => ({
+            x: p.x * canvasEl.width,
+            y: p.y * canvasEl.height,
+          }));
+          ctx.fillStyle = 'white';
+          pts.forEach(pt => { ctx.beginPath(); ctx.arc(pt.x, pt.y, 5, 0, Math.PI*2); ctx.fill(); });
+          ctx.strokeStyle = 'cyan';
+          ctx.lineWidth = 2;
+          for (const [a,b] of HAND_CONNECTIONS) {
+            ctx.beginPath(); ctx.moveTo(pts[a].x, pts[a].y); ctx.lineTo(pts[b].x, pts[b].y); ctx.stroke();
+          }
+        }
+        drawRafRef.current = requestAnimationFrame(loop);
+      };
+      loop();
+
+      return () => {
+        run = false;
+        window.removeEventListener('resize', resizeCanvas);
+        if (drawRafRef.current) cancelAnimationFrame(drawRafRef.current);
+      };
+    })();
+  }, [showLandmarks, iAmOwner]);
+
   // -------- handlers ---------
   const sendChat = () => {
     if (!chatInput.trim() || !room) return;
@@ -285,6 +554,8 @@ const VideoRoom = () => {
         <button onClick={() => setShowLandmarks((v) => !v)} title="Show Landmarks">🖐️</button>
         <button className="leave-btn" onClick={leaveRoom}>나가기</button>
       </div>
+      {showLandmarks && <canvas ref={handsCanvasRef} id="hands-overlay" />}
+      <div className="gesture-label">{gestureLabel ?? ''}</div>
     </div>
   );
 };
