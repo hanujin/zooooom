@@ -399,7 +399,7 @@ const VideoRoom = () => {
   // ----------------- DRAW LOOP (only when showLandmarks) ----------
   useEffect(() => {
     // tear down
-    if (!showLandmarks) {
+    if (!showLandmarks && !drawMode) {
       if (drawRafRef.current) cancelAnimationFrame(drawRafRef.current);
       const ctx = handsCanvasRef.current?.getContext('2d');
       if (ctx && handsCanvasRef.current) {
@@ -454,7 +454,7 @@ const VideoRoom = () => {
           if (drawMode) {
             const penCtx = penCtxRef.current;
             if (penCtx) {
-              const tip = pts[8]; // index fingertip
+              const tip = { x: w - pts[8].x, y: pts[8].y };
               if (lastTipRef.current) {
                 penCtx.strokeStyle = 'cyan';
                 penCtx.lineWidth   = 4;
@@ -488,7 +488,7 @@ const VideoRoom = () => {
         if (drawRafRef.current) cancelAnimationFrame(drawRafRef.current);
       };
     })();
-  }, [showLandmarks, iAmOwner]);
+  }, [showLandmarks, iAmOwner, drawMode]);
 
   // -------- handlers ---------
   const sendChat = () => {
@@ -588,7 +588,11 @@ const VideoRoom = () => {
         <button onClick={() => setShowLandmarks((v) => !v)} title="Show Landmarks">🖐️</button>
         <button className="leave-btn" onClick={leaveRoom}>나가기</button>
       </div>
-      {showLandmarks && <canvas ref={handsCanvasRef} id="hands-overlay" />}
+      <canvas
+        ref={handsCanvasRef}
+        id="hands-overlay"
+        style={{ display: showLandmarks ? 'block' : 'none' }}
+        />
       <div className="gesture-label">{gestureLabel ?? ''}</div>
     </div>
   );
