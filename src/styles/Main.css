@@ -103,3 +103,42 @@
   height: auto;
   z-index: 2;
 }
+
+.banner-container {
+  position: absolute;
+  bottom: 20px; /* 동굴 이미지 위에 적절히 위치하도록 조정 */
+  left: 50px;
+  z-index: 3; /* 동굴 이미지보다 앞에 오도록 z-index 설정 */
+  display: flex;
+  gap: 170px; /* 배너 사이의 간격 */
+}
+
+.banner-item {
+  position: relative;
+  cursor: pointer;
+  transition: transform 0.2s ease-in-out;
+}
+
+.banner-item:hover {
+  transform: scale(1.05); /* 마우스 호버 시 약간 확대되는 효과 */
+}
+
+.banner-image {
+  width: 320px; /* 배너 크기 조정 */
+  height: auto;
+  display: block;
+}
+
+.banner-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  font-family: 'Titan One', cursive;
+  font-size: 1.2rem;
+  font-weight: normal; /* Titan One is already bold */
+  text-align: center;
+  width: 100%;
+  text-shadow: 2px 2px 6px rgba(0, 0, 0, 0.8);
+}
