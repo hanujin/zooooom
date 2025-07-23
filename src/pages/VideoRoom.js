@@ -95,22 +95,15 @@ function VideoRoom() {
     const cursorX = landmarks[8].x * canvasRef.current.width;
     const cursorY = landmarks[8].y * canvasRef.current.height;
 
-    if (currentGesture === 'grab') {
-      if (!isPainting) {
-        setLines(prevLines => [...prevLines, { points: [{ x: cursorX, y: cursorY }], color, lineWidth }]);
-        setIsPainting(true);
-      } else {
+    // 'grab' 관련 로직이 제거되었으므로, 그리기 시작/중지 로직을 다른 제스처나 UI 버튼에 연결해야 합니다.
+    // 현재는 isPainting 상태가 변경되지 않아 그리기가 동작하지 않습니다.
+    if (isPainting) {
         setLines(prevLines => {
           const lastLine = prevLines[prevLines.length - 1];
           const newPoints = [...lastLine.points, { x: cursorX, y: cursorY }];
           const newLine = { ...lastLine, points: newPoints };
           return [...prevLines.slice(0, -1), newLine];
         });
-      }
-    } else {
-      if (isPainting) {
-        setIsPainting(false);
-      }
     }
   }, [detectionResults, isDrawingMode, currentGestureText, color, lineWidth, isPainting]);
 
@@ -134,17 +127,7 @@ function VideoRoom() {
 
     // 제스처가 변경될 때만 특정 액션(클릭, 토글)을 트리거
     if (prevGestureRef.current !== currentGestureText) {
-      if (currentGestureText === 'grab' && !isDrawingMode) {
-        // 현재 커서 위치의 엘리먼트를 찾아서 클릭
-        const clickElem = document.elementFromPoint(cursorX, cursorY);
-        if (clickElem) {
-          // 클릭 가능한 요소인지 확인 (예: button, a 등)
-          if (typeof clickElem.click === 'function') {
-            clickElem.click();
-            console.log("Clicked element:", clickElem);
-          }
-        }
-      } else if (currentGestureText === 'draw_mode') {
+      if (currentGestureText === 'draw_mode') {
         setIsDrawingMode(prev => !prev);
       }
     }
@@ -157,12 +140,6 @@ function VideoRoom() {
         setCursorPosition({ x: cursorX, y: cursorY });
         setIsCursorVisible(true);
         setIsGrabbing(false);
-        break;
-      
-      case 'grab':
-        setCursorPosition({ x: cursorX, y: cursorY });
-        setIsCursorVisible(true);
-        setIsGrabbing(true);
         break;
 
       // TODO: 아래 제스처들에 대한 실제 액션 함수를 연결해야 합니다.
@@ -214,7 +191,7 @@ function VideoRoom() {
         console.log("TensorFlow.js 모델 로딩 성공.");
         
         // Python 학습 스크립트의 정렬된 순서와 동일하게 설정
-        const actionList = ['camera_toggle', 'cursor', 'draw_mode', 'exit_room', 'grab', 'mute', 'resize', 'volume_down', 'volume_up'];
+        const actionList = ['camera_toggle', 'cursor', 'draw_mode', 'exit_room', 'mute', 'volume_down', 'volume_up'];
         setActions(actionList);
         console.log("학습된 제스처 목록:", actionList);
 

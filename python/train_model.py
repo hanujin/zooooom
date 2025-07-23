@@ -1,8 +1,9 @@
 import os
 import numpy as np
 from sklearn.model_selection import train_test_split
+from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense
+from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
 from tensorflow.keras.utils import to_categorical
 
 # 데이터 및 모델 경로 설정
@@ -16,23 +17,28 @@ X_data = []
 y_data = []
 actions = []
 
+num_classes = 0
+
 # 파일 목록을 정렬하여 항상 동일한 순서를 보장
 file_list = sorted(os.listdir(DATA_PATH))
 
-for i, file_name in enumerate(file_list):
+for file_name in file_list:
     if not file_name.endswith('.npy'):
         continue
     
     action = file_name.split('.')[0]
+    
     actions.append(action)
     
     data = np.load(os.path.join(DATA_PATH, file_name))
     X_data.append(data)
     
     # 각 데이터 포인트에 라벨(제스처 인덱스) 할당
-    y_data.append(np.full(data.shape[0], i))
+    label_index = len(actions) - 1
+    y_data.append(np.full(data.shape[0], label_index))
 
 print(f"수집된 제스처: {actions}")
+num_classes = len(actions)
 
 X_data = np.concatenate(X_data, axis=0)
 y_data = np.concatenate(y_data, axis=0).astype(int)
@@ -48,14 +54,19 @@ y_test_categorical = to_categorical(y_test, num_classes=len(actions))
 
 # 모델 구성
 model = Sequential([
-    Dense(128, activation='relu', input_shape=(63,)), # 21 landmarks * 3 axes (x, y, z)
+    Dense(256, activation='relu', input_shape=(63,)),
+    BatchNormalization(),
+    Dropout(0.4),
+    Dense(128, activation='relu'),
+    BatchNormalization(),
+    Dropout(0.3),
     Dense(64, activation='relu'),
-    Dense(32, activation='relu'),
-    Dense(len(actions), activation='softmax') # 출력층: 제스처 개수만큼 노드, 활성화 함수는 softmax
+    Dropout(0.2),
+    Dense(num_classes, activation='softmax')
 ])
 
 model.compile(
-    optimizer='adam',
+    optimizer=Adam(learning_rate=0.001),
     loss='categorical_crossentropy',
     metrics=['accuracy']
 )
