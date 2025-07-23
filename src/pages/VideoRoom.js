@@ -6,16 +6,6 @@ import { API_BASE } from '../config';
 import { HandLandmarker, FilesetResolver, DrawingUtils } from "@mediapipe/tasks-vision";
 import '../styles/VideoRoom.css';
 
-/**
- * Simplified version using your Prisma model:
- *  - Fetch room via GET /rooms/by-code/:code
- *  - Room object already includes ownerUserId
- *  - No /auth/me call anymore.
- *
- * We infer current user id by decoding the JWT locally (if present), or by
- * an "isOwner" flag passed in router state/query when you create/join.
- */
-
 // Mediapipe hand skeleton pairs
 const HAND_CONNECTIONS = [
   [0,1],[1,2],[2,3],[3,4],
@@ -130,6 +120,11 @@ const VideoRoom = () => {
   const roleFromState = location.state?.role;
   const passwordFromState = location.state?.password;
   const [iAmOwner, setIAmOwner] = useState(false);
+
+  //PEN
+  const penCtxRef   = useRef(null);
+  const lastTipRef  = useRef(null);
+  const penRafRef = useRef(0);
 
   const changeVolume = (delta) => {
     const vid = iAmOwner ? participantVideoRef.current : ownerVideoRef.current;
@@ -363,14 +358,17 @@ const VideoRoom = () => {
           const model = knnModelRef.current;
           if (model) {
             const pred = knnPredict(norm, model);
-            const now = performance.now();
-            if (currentGestureRef.current !== pred) {
-              currentGestureRef.current = pred;
-              stableSinceRef.current = now;
-            } else if (now - stableSinceRef.current >= 250) {  // 0.8s stable
+            const now  = performance.now();
+            const hold = holdRef.current;
+
+            if (pred !== hold.pred) {
+              hold.pred  = pred;
+              hold.since = now;
+              hold.fired = false;
+            } else if (!hold.fired && now - hold.since >= 1000) { // 1 second
               setGestureLabel(pred);
               triggerAction(pred);
-              stableSinceRef.current = now;
+              hold.fired = true;   // don't spam while still holding
             }
           }
         } else { console.log('[CLS] no hand'); }
@@ -384,7 +382,19 @@ const VideoRoom = () => {
     };
   }, []);
 
-  useEffect(()=>{ if(window.DEBUG_GES) console.log('LABEL->', gestureLabel); }, [gestureLabel]);
+  /// // ----------------- VIDEO CANVAS SETUP -----------
+  useEffect(() => {
+    const cvs = canvasRef.current;
+    if (!cvs) return;
+    cvs.width  = window.innerWidth;
+    cvs.height = window.innerHeight;
+    penCtxRef.current = cvs.getContext('2d');
+
+    if (!drawMode) {
+      // leaving draw mode -> stop stroke, clear last point
+      lastTipRef.current = null;
+    }
+  }, [drawMode]);
 
   // ----------------- DRAW LOOP (only when showLandmarks) ----------
   useEffect(() => {
@@ -433,10 +443,33 @@ const VideoRoom = () => {
         ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
         if (res?.landmarks?.length) {
           const lmList = res.landmarks[0];
+          const penCvs = canvasRef.current;
+          if (!penCvs) { run = false; return; }   // canvas gone, stop loop
+          const w = penCvs.width, h = penCvs.height;
           const pts = lmList.map(p => ({
-            x: p.x * canvasEl.width,
-            y: p.y * canvasEl.height,
+            x: p.x * w,
+            y: p.y * h,
           }));
+          // --- PEN DRAW ---
+          if (drawMode) {
+            const penCtx = penCtxRef.current;
+            if (penCtx) {
+              const tip = pts[8]; // index fingertip
+              if (lastTipRef.current) {
+                penCtx.strokeStyle = 'cyan';
+                penCtx.lineWidth   = 4;
+                penCtx.lineCap     = 'round';
+                penCtx.beginPath();
+                penCtx.moveTo(lastTipRef.current.x, lastTipRef.current.y);
+                penCtx.lineTo(tip.x, tip.y);
+                penCtx.stroke();
+              }
+              lastTipRef.current = tip;
+            }
+          } else {
+            lastTipRef.current = null;
+          }
+          // --- END PEN DRAW ---
           ctx.fillStyle = 'white';
           pts.forEach(pt => { ctx.beginPath(); ctx.arc(pt.x, pt.y, 5, 0, Math.PI*2); ctx.fill(); });
           ctx.strokeStyle = 'cyan';
@@ -476,8 +509,9 @@ const VideoRoom = () => {
   const toggleMute = () => {
     const track = localStreamRef.current?.getAudioTracks()[0];
     if (!track) return;
-    track.enabled = !track.enabled;
-    setMuted(!track.enabled);
+    const next = !track.enabled
+    track.enabled = next;
+    setMuted(!next);
   };
 
   const leaveRoom = async () => {
@@ -520,7 +554,7 @@ const VideoRoom = () => {
           <div className="name-tag">Participant</div>
         </div>
 
-        {drawMode && <canvas ref={canvasRef} className="draw-layer" />}
+         <canvas ref={canvasRef} className="draw-layer" style={{pointerEvents:'none'}} />
       </div>
 
       <aside className="chat-panel">
